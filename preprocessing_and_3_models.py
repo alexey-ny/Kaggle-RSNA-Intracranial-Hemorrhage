@@ -434,6 +434,23 @@ def fit_predict_save(model_T, model_name,fold_num):
     with open((f'history_{fold_num}folds.pickle'), 'wb') as f:
         pickle.dump(history_new, f, pickle.HIGHEST_PROTOCOL)
 # -------------------------------------------------------------------------------------------------------------------------
+# validate the result the same way test set prediction
+def valid_predictions(model_T):
+    preds = []
+    preds.append(model_T.model.predict_generator(
+                    DataGenerator(X_val.index, None, 16, (256, 256, 3), train_images_dir, testAugment = False), 
+                            use_multiprocessing=False,
+                            workers=8,
+                            verbose=1)[:len(X_val)])
+    for i in range(3):
+        preds.append(model_T.model.predict_generator(
+                    DataGenerator(X_val.index, None, 16, (256, 256, 3), train_images_dir, testAugment = True), 
+                            use_multiprocessing=False,
+                            workers=8,
+                            verbose=1)[:len(X_val)])
+    val = np.average(preds, axis=0)
+    return val
+# -------------------------------------------------------------------------------------------------------------------------
 
     
 X_train, X_val = train_test_split(df_with_brain, test_size=0.1, random_state=1970)
@@ -441,6 +458,7 @@ df_new = X_train.copy()
 
 ss_new = ShuffleSplit(n_splits=4, test_size=0.2, random_state=1970).split(df_new.index)
 history_new = []
+valid_history = []
 
 num_folds = 5
 for cnt in range(1,num_folds+1):
@@ -452,6 +470,24 @@ for cnt in range(1,num_folds+1):
     fit_predict_save(model_InceptionV3, 'V3', cnt)
     fit_predict_save(model_EfficientNetB0, 'B0', cnt)
     
+    V_B0 = valid_predictions(model_EfficientNetB0)
+    val_B0 = weighted_log_loss_metric(X_val.values, V_B0)
+    V_B2 = valid_predictions(model_EfficientNetB2)
+    val_B2 = weighted_log_loss_metric(X_val.values, V_B2)
+    V_V3 = valid_predictions(model_InceptionV3)
+    val_V3 = weighted_log_loss_metric(X_val.values, V_V3)
+    
+    all3_val = [V_B0 , V_B2 , V_V3]
+    val_avg3 = np.average(all3_val, axis=0)
+    val_ALL3 = weighted_log_loss_metric(X_val.values, val_avg3)
+    
+    valid_history.append({'B0':val_B0})
+    valid_history.append({'B2':val_B2})
+    valid_history.append({'V3':val_V3})
+    valid_history.append({'avg_3':val_ALL3})
+    with open('history_validation.pickle', 'wb') as f:
+        pickle.dump(valid_history, f, pickle.HIGHEST_PROTOCOL)
+
     
 shapes = history_new[0][0].shape
 
@@ -468,5 +504,3 @@ test_df_pred = test_df_pred.stack().reset_index()
 test_df_pred.insert(loc=0, column='ID', value=test_df_pred['Image'].astype(str) + "_" + test_df_pred['Diagnosis'])
 test_df_pred = test_df_pred.drop(["Image", "Diagnosis"], axis=1)
 test_df_pred.to_csv('stage2_b2v3b0_5e-4folds-2_last_epochs-4TTA-256.csv', index=False)
-
-   
